@@ -372,12 +372,113 @@ def test_osrm_query():
 
 
 # ---------------------------------------------------------------------------
+# 4. Real OSRM integration tests (optional, requires a live OSRM server)
+# ---------------------------------------------------------------------------
+
+# Monaco coordinates for real routing tests.
+# Points on Boulevard du Larvotto, a well-mapped street.
+MONACO_DEPOT  = [7.4246, 43.7312]
+MONACO_JOBS   = [
+    {"id": 1, "location": [7.4188, 43.7285], "service": 60, "approach": "curb",         "description": "stop A — curb"},
+    {"id": 2, "location": [7.4270, 43.7350], "service": 60, "approach": "curb",         "description": "stop B — curb"},
+    {"id": 3, "location": [7.4310, 43.7380], "service": 60, "approach": "unrestricted", "description": "stop C — unrestricted"},
+    {"id": 4, "location": [7.4152, 43.7256], "service": 60,                              "description": "stop D — default"},
+]
+
+
+def osrm_reachable(host: str, port: int) -> bool:
+    import socket
+    try:
+        with socket.create_connection((host, port), timeout=2):
+            return True
+    except OSError:
+        return False
+
+
+def test_real_osrm(host: str, port: int):
+    section(f"4. Intégration OSRM réel ({host}:{port})")
+
+    payload = {
+        "vehicles": [{
+            "id": 1,
+            "start": MONACO_DEPOT,
+            "end":   MONACO_DEPOT,
+            "profile": "driving",
+        }],
+        "jobs": MONACO_JOBS,
+    }
+
+    args = ["-r", "osrm", "-a", f"driving:{host}", "-p", f"driving:{port}"]
+    rc, out = run_vroom(payload, args)
+
+    # Solution trouvée, tous les jobs assignés
+    if rc != 0 or out.get("code") != 0:
+        fail("Optimisation échouée", out.get("error", str(out)))
+        return
+
+    routes    = out.get("routes", [])
+    unassigned = out.get("unassigned", [])
+
+    if unassigned:
+        fail(f"{len(unassigned)} job(s) non assigné(s)", str(unassigned))
+    else:
+        ok(f"Tous les jobs assignés — {len(routes)} route(s)")
+
+    if not routes:
+        return
+
+    route   = routes[0]
+    summary = out.get("summary", {})
+    cost    = summary.get("cost", "?")
+    duration = summary.get("duration", "?")
+    ok(f"Coût total : {cost}s, durée : {duration}s")
+
+    # Vérifie que les étapes ont des heures d'arrivée croissantes
+    steps    = route.get("steps", [])
+    arrivals = [s["arrival"] for s in steps if "arrival" in s]
+    if arrivals == sorted(arrivals):
+        ok(f"Heures d'arrivée cohérentes : {arrivals}")
+    else:
+        fail("Heures d'arrivée non monotones", str(arrivals))
+
+    # Vérifie que la géométrie est demandable sans erreur
+    rc2, out2 = run_vroom(payload, args + ["-g"])
+    if rc2 == 0 and out2.get("code") == 0:
+        has_geom = bool(out2["routes"][0].get("geometry"))
+        if has_geom:
+            ok("Géométrie (-g) retournée avec approaches=curb")
+        else:
+            fail("Géométrie absente dans la réponse")
+    else:
+        fail("Échec avec flag -g (géométrie)", out2.get("error", ""))
+
+    # Affiche le détail de la tournée
+    print()
+    print("  Détail de la tournée :")
+    for step in steps:
+        stype = step["type"]
+        loc   = step.get("location", [])
+        arr   = step.get("arrival", 0)
+        jid   = f"  job={step['job']}" if "job" in step else ""
+        coord = f"[{loc[0]:.4f}, {loc[1]:.4f}]" if loc else ""
+        print(f"    {stype:12s} {coord:26s} arrivée={arr:5d}s{jid}")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="VROOM approach constraint test suite")
+    parser.add_argument("--osrm-host", default=None,
+                        help="Hôte d'un serveur OSRM réel (ex: localhost)")
+    parser.add_argument("--osrm-port", type=int, default=5001,
+                        help="Port du serveur OSRM réel (défaut: 5001)")
+    args = parser.parse_args()
+
     print(f"\nVROOM approach constraint test suite")
-    print(f"Binary: {VROOM_BIN}")
+    print(f"Binary : {VROOM_BIN}")
 
     if not build_vroom():
         print(f"\n{RED}Build failed — aborting tests.{RESET}")
@@ -385,6 +486,18 @@ def main():
 
     test_parsing()
     test_osrm_query()
+
+    # Tests d'intégration contre un vrai OSRM
+    osrm_host = args.osrm_host or "localhost"
+    osrm_port = args.osrm_port
+
+    if osrm_reachable(osrm_host, osrm_port):
+        test_real_osrm(osrm_host, osrm_port)
+    else:
+        section("4. Intégration OSRM réel (ignorée)")
+        print(f"  {YELLOW}Serveur OSRM non joignable sur {osrm_host}:{osrm_port}{RESET}")
+        print(f"  Lancer d'abord : scripts/osrm_local_setup.sh")
+        print(f"  Puis relancer  : python3 test_approach.py --osrm-host localhost --osrm-port {osrm_port}")
 
     print(f"\n{'─' * 60}")
     total = passed + failed
