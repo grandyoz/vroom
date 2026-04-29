@@ -4,4 +4,4 @@ bin/
 lib/
 build/
 .vscode
-.idea
+.ideascripts/__pycache__/
