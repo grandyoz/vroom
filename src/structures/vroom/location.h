@@ -23,6 +23,7 @@ private:
   // Coordinates (not mandatory).
   OptionalCoordinates _coords;
   bool _user_index;
+  APPROACH _approach{APPROACH::UNRESTRICTED};
 
 public:
   explicit Location(Index index);
@@ -32,6 +33,14 @@ public:
   explicit Location(const Coordinates& coords);
 
   void set_index(Index index);
+
+  APPROACH approach() const {
+    return _approach;
+  }
+
+  void set_approach(APPROACH a) {
+    _approach = a;
+  }
 
   bool has_coordinates() const;
 

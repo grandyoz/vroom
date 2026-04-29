@@ -489,16 +489,39 @@ inline Location get_task_location(const rapidjson::Value& v,
                                      v["id"].GetUint64()));
   }
 
-  if (has_location_index) {
-    // Custom provided matrices and index.
-    const Index location_index = v["location_index"].GetUint();
-    if (has_location_coords) {
-      return Location({location_index, parse_coordinates(v, "location")});
+  Location loc = [&] {
+    if (has_location_index) {
+      // Custom provided matrices and index.
+      const Index location_index = v["location_index"].GetUint();
+      if (has_location_coords) {
+        return Location({location_index, parse_coordinates(v, "location")});
+      }
+      return Location(location_index);
     }
-    return Location(location_index);
+    check_location(v, task_type);
+    return Location(parse_coordinates(v, "location"));
+  }();
+
+  if (v.HasMember("approach")) {
+    if (!v["approach"].IsString()) {
+      throw InputException(std::format("Invalid approach for {} {}.",
+                                       task_type,
+                                       v["id"].GetUint64()));
+    }
+    const std::string approach_str = v["approach"].GetString();
+    if (approach_str == "curb") {
+      loc.set_approach(APPROACH::CURB);
+    } else if (approach_str != "unrestricted") {
+      throw InputException(
+        std::format("Invalid approach value '{}' for {} {} (expected "
+                    "'curb' or 'unrestricted').",
+                    approach_str,
+                    task_type,
+                    v["id"].GetUint64()));
+    }
   }
-  check_location(v, task_type);
-  return Location(parse_coordinates(v, "location"));
+
+  return loc;
 }
 
 inline Job get_job(const rapidjson::Value& json_job, unsigned amount_size) {

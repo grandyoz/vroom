@@ -92,6 +92,11 @@ constexpr auto DEFAULT_MAX_DISTANCE = std::numeric_limits<Distance>::max();
 // Available routing engines.
 enum class ROUTER : std::uint8_t { OSRM, LIBOSRM, ORS, VALHALLA };
 
+// Approach constraint for a location: CURB forces the routing engine
+// to arrive on the curbside of the road (right side in right-hand
+// traffic), UNRESTRICTED lets the engine choose freely.
+enum class APPROACH : std::uint8_t { UNRESTRICTED, CURB };
+
 // Used to describe a routing server.
 struct Server {
   std::string host;

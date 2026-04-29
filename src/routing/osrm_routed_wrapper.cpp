@@ -37,14 +37,33 @@ OsrmRoutedWrapper::build_query(const std::vector<Location>& locations,
                    locations.size() *
                      (DEFAULT_OSRM_SNAPPING_RADIUS.size() + 1));
 
-  // Adding locations and radiuses values.
+  // Build approaches parameter when at least one location requires
+  // curb-side arrival.
+  const bool has_curb =
+    std::ranges::any_of(locations, [](const auto& loc) {
+      return loc.approach() == APPROACH::CURB;
+    });
+  std::string approaches;
+  if (has_curb) {
+    approaches = "approaches=";
+    approaches.reserve(approaches.size() + locations.size() * 13);
+  }
+
+  // Adding locations, radiuses and approach values.
   for (auto const& location : locations) {
     query += std::format("{:.6f},{:.6f};", location.lon(), location.lat());
     radiuses += DEFAULT_OSRM_SNAPPING_RADIUS + ";";
+    if (has_curb) {
+      approaches +=
+        (location.approach() == APPROACH::CURB) ? "curb;" : "unrestricted;";
+    }
   }
   // Remove trailing ';'.
   query.pop_back();
   radiuses.pop_back();
+  if (has_curb) {
+    approaches.pop_back();
+  }
 
   if (service == _route_service) {
     query += "?" + _routing_args;
@@ -53,6 +72,9 @@ OsrmRoutedWrapper::build_query(const std::vector<Location>& locations,
     query += "?annotations=duration,distance";
   }
   query += "&" + radiuses;
+  if (has_curb) {
+    query += "&" + approaches;
+  }
 
   query += " HTTP/1.1\r\n";
   query += "Host: " + _server.host + "\r\n";
