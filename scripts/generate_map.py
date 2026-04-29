@@ -127,8 +127,16 @@ def extract_route_info(solution: dict) -> tuple[list, list[dict]]:
         return [], []
     route    = solution["routes"][0]
     geometry = route.get("geometry", "")
-    coords   = decode_polyline(geometry) if geometry else []
     steps    = route.get("steps", [])
+    if geometry:
+        coords = decode_polyline(geometry)
+    else:
+        # Fallback : segments droits entre les étapes (pas de géométrie OSRM)
+        coords = [
+            (s["location"][1], s["location"][0])
+            for s in steps
+            if s.get("location")
+        ]
     return coords, steps
 
 
@@ -337,7 +345,9 @@ def main():
         sys.exit(1)
     coords_free, steps_free = extract_route_info(sol_free)
     cost_free = sol_free["summary"]["cost"]
+    geom_free = sol_free["routes"][0].get("geometry", "") if sol_free.get("routes") else ""
     print(f"  Coût : {cost_free}s — ordre : {[s['job'] for s in steps_free if s['type']=='job']}")
+    print(f"  Géométrie : {len(geom_free)} chars encodés → {len(coords_free)} points décodés")
 
     print("\n▶ Optimisation AVEC approach=curb…")
     sol_curb = run_vroom(
@@ -349,7 +359,9 @@ def main():
         sys.exit(1)
     coords_curb, steps_curb = extract_route_info(sol_curb)
     cost_curb = sol_curb["summary"]["cost"]
+    geom_curb = sol_curb["routes"][0].get("geometry", "") if sol_curb.get("routes") else ""
     print(f"  Coût : {cost_curb}s — ordre : {[s['job'] for s in steps_curb if s['type']=='job']}")
+    print(f"  Géométrie : {len(geom_curb)} chars encodés → {len(coords_curb)} points décodés")
 
     diff = cost_curb - cost_free
     print(f"\n  Différence de coût : {diff:+d}s ({'+' if diff>=0 else ''}{diff/cost_free*100:.1f}%)")
