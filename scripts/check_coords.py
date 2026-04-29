@@ -41,19 +41,33 @@ def check_nearest(host: str, port: int, lon: float, lat: float) -> tuple[bool, s
 
 def check_table_curb(host: str, port: int, coords: list[tuple[float, float]]) -> list[bool]:
     """
-    Appel table avec approaches=curb sur tous les points.
-    Retourne pour chaque point si la durée de sortie est valide (non None).
+    Table N×N complète avec approaches=curb — même requête que VROOM.
+    Un point est marqué KO si aucune durée valide n'existe depuis/vers lui.
     """
     coord_str = ";".join(f"{lon:.6f},{lat:.6f}" for lat, lon in coords)
     approaches = ";".join(["curb"] * len(coords))
     url = (f"http://{host}:{port}/table/v1/driving/{coord_str}"
-           f"?annotations=duration&approaches={approaches}&sources=0&destinations=all")
+           f"?annotations=duration&approaches={approaches}")
     try:
         d = get(url)
+        if d.get("code") == "NoSegment":
+            # Identifie le point fautif via le message d'erreur
+            msg = d.get("message", "")
+            results = [True] * len(coords)
+            for i in range(len(coords)):
+                if str(i) in msg:
+                    results[i] = False
+            return results
         if d.get("code") != "Ok":
             return [False] * len(coords)
-        durations = d["durations"][0]
-        return [v is not None for v in durations]
+        matrix = d["durations"]
+        # Un point i est KO si toute sa ligne OU toute sa colonne est None
+        ok = []
+        for i in range(len(coords)):
+            row_ok = any(matrix[i][j] is not None for j in range(len(coords)) if j != i)
+            col_ok = any(matrix[j][i] is not None for j in range(len(coords)) if j != i)
+            ok.append(row_ok and col_ok)
+        return ok
     except Exception as e:
         print(f"  {RED}Erreur table : {e}{RESET}")
         return [False] * len(coords)
