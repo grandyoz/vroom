@@ -73,10 +73,42 @@ def check_table_curb(host: str, port: int, coords: list[tuple[float, float]]) ->
         return [False] * len(coords)
 
 
+def check_single_curb(host: str, port: int, lat: float, lon: float,
+                      others: list[tuple[float, float]]) -> bool:
+    """Teste si un point isolé est compatible curb dans une table avec les autres points."""
+    coords = [(lat, lon)] + others
+    results = check_table_curb(host, port, coords)
+    return results[0]
+
+
+def find_nearby_curb(host: str, port: int, lat: float, lon: float,
+                     others: list[tuple[float, float]],
+                     step: float = 0.0002, radius: int = 4) -> list[tuple[float, float, float]]:
+    """Scanne une grille autour du point pour trouver des alternatives compatibles curb."""
+    candidates = []
+    for dlat in range(-radius, radius + 1):
+        for dlon in range(-radius, radius + 1):
+            if dlat == 0 and dlon == 0:
+                continue
+            clat = lat + dlat * step
+            clon = lon + dlon * step
+            # Vérifie d'abord que le point est sur une route
+            ok_nearest, _, _ = check_nearest(host, port, clon, clat)
+            if not ok_nearest:
+                continue
+            if check_single_curb(host, port, clat, clon, others):
+                dist_m = ((dlat * step * 111000) ** 2 + (dlon * step * 85000) ** 2) ** 0.5
+                candidates.append((clat, clon, dist_m))
+    candidates.sort(key=lambda x: x[2])
+    return candidates[:5]
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--osrm-host", default="localhost")
     parser.add_argument("--osrm-port", type=int, default=5001)
+    parser.add_argument("--suggest", action="store_true",
+                        help="Cherche des alternatives pour les points incompatibles")
     parser.add_argument("coords", nargs="+",
                         help='Coordonnées "lat,lon" à tester')
     args = parser.parse_args()
@@ -118,13 +150,27 @@ def main():
         if not ok:
             all_ok = False
 
-    # ── Résumé ───────────────────────────────────────────────────────────────
+    # ── Résumé / suggestions ─────────────────────────────────────────────────
     print()
     if all_ok:
         print(f"{GREEN}Tous les points sont compatibles avec approach=curb.{RESET}")
     else:
-        print(f"{YELLOW}Certains points ne supportent pas approach=curb.")
-        print(f"Déplacez-les légèrement ou retirez la contrainte pour ces jobs.{RESET}")
+        print(f"{YELLOW}Certains points ne supportent pas approach=curb.{RESET}")
+        if args.suggest:
+            print()
+            for i, ((lat, lon), ok) in enumerate(zip(points, results)):
+                if ok:
+                    continue
+                others = [p for j, p in enumerate(points) if j != i]
+                print(f"  Recherche d'alternatives pour Point {i+1} [{lat}, {lon}]…")
+                alts = find_nearby_curb(args.osrm_host, args.osrm_port, lat, lon, others)
+                if alts:
+                    for clat, clon, dist in alts:
+                        print(f"    {GREEN}→ {clat:.6f}, {clon:.6f}  (~{dist:.0f}m){RESET}")
+                else:
+                    print(f"    {RED}Aucune alternative trouvée dans un rayon de ~90m{RESET}")
+        else:
+            print(f"  Relancez avec --suggest pour trouver des alternatives proches.")
     print()
 
 
