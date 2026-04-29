@@ -148,6 +148,8 @@ def build_html(
     steps_free: list,
     coords_curb: list,
     steps_curb: list,
+    cost_free: int = 0,
+    cost_curb: int = 0,
 ) -> str:
 
     # Centrage de la carte sur le barycentre des jobs
@@ -192,6 +194,11 @@ def build_html(
 
     depot_lat, depot_lon = depot_latlon
 
+    diff    = cost_curb - cost_free
+    diff_pct = f"{diff/cost_free*100:+.1f}%" if cost_free else ""
+    order_free = [s["job"] for s in steps_free if s.get("type") == "job"]
+    order_curb = [s["job"] for s in steps_curb if s.get("type") == "job"]
+
     return f"""<!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -202,28 +209,25 @@ def build_html(
   <style>
     body {{ margin: 0; font-family: sans-serif; }}
     #map {{ height: 100vh; }}
-    .legend {{
+    .info-box {{
       background: white;
-      padding: 10px 14px;
+      padding: 12px 16px;
       border-radius: 6px;
       box-shadow: 0 1px 5px rgba(0,0,0,.4);
-      line-height: 1.8em;
       font-size: 13px;
+      line-height: 1.9em;
+      min-width: 230px;
     }}
-    .legend span {{
-      display: inline-block;
-      width: 28px;
-      height: 4px;
-      margin-right: 6px;
-      vertical-align: middle;
-      border-radius: 2px;
+    .info-box table {{ border-collapse: collapse; width: 100%; margin-top: 6px; }}
+    .info-box td {{ padding: 2px 6px; }}
+    .info-box td:first-child {{ font-weight: bold; color: #555; white-space: nowrap; }}
+    .swatch {{
+      display: inline-block; width: 24px; height: 4px;
+      vertical-align: middle; border-radius: 2px; margin-right: 5px;
     }}
     .dot {{
-      width: 12px; height: 12px;
-      border-radius: 50%;
-      display: inline-block;
-      vertical-align: middle;
-      margin-right: 6px;
+      width: 11px; height: 11px; border-radius: 50%;
+      display: inline-block; vertical-align: middle; margin-right: 5px;
     }}
   </style>
 </head>
@@ -238,79 +242,99 @@ def build_html(
 {js_curb_steps}
 
 // ── Carte ────────────────────────────────────────────────────────────────
-const map = L.map("map").setView([{center_lat}, {center_lon}], 16);
+const map = L.map("map").setView([{center_lat}, {center_lon}], 15);
 
 L.tileLayer("https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png", {{
   attribution: "© OpenStreetMap contributors",
   maxZoom: 19,
 }}).addTo(map);
 
-// ── Tracés ───────────────────────────────────────────────────────────────
-const lineFree = L.polyline(polyFree, {{
-  color: "#2979ff", weight: 4, opacity: 0.8,
-}}).addTo(map).bindTooltip("Sans contrainte (bleu)");
+// ── Groupes de couches ────────────────────────────────────────────────────
+const grpFree = L.layerGroup();
+const grpCurb = L.layerGroup();
 
-const lineCurb = L.polyline(polyCurb, {{
-  color: "#e53935", weight: 4, opacity: 0.8, dashArray: "8 4",
-}}).addTo(map).bindTooltip("Avec approach=curb (rouge)");
+// ── Tracés ───────────────────────────────────────────────────────────────
+L.polyline(polyFree, {{
+  color: "#2979ff", weight: 5, opacity: 0.85,
+}}).addTo(grpFree).bindTooltip("Sans contrainte — {cost_free}s");
+
+L.polyline(polyCurb, {{
+  color: "#e53935", weight: 5, opacity: 0.85, dashArray: "10 5",
+}}).addTo(grpCurb).bindTooltip("Avec approach=curb — {cost_curb}s");
 
 // ── Marqueurs d'ordre de visite ───────────────────────────────────────────
-function addStepMarkers(steps, color) {{
+function addStepMarkers(steps, color, grp) {{
   steps.forEach(s => {{
     L.circleMarker([s.lat, s.lon], {{
-      radius: 11, color: "white", fillColor: color,
+      radius: 12, color: "white", fillColor: color,
       fillOpacity: 1, weight: 2,
-    }}).addTo(map)
+    }}).addTo(grp)
     .bindTooltip(`<b>Ordre ${{s.label}}</b><br>${{s.desc}}`, {{sticky: true}});
 
     L.marker([s.lat, s.lon], {{
       icon: L.divIcon({{
         className: "",
         html: `<div style="color:white;font-weight:bold;font-size:11px;
-                            text-align:center;line-height:22px;">${{s.label}}</div>`,
-        iconSize: [22, 22],
-        iconAnchor: [11, 11],
+                            text-align:center;line-height:24px;">${{s.label}}</div>`,
+        iconSize: [24, 24], iconAnchor: [12, 12],
       }})
-    }}).addTo(map);
+    }}).addTo(grp);
   }});
 }}
 
-addStepMarkers(stepsFree, "#2979ff");
-addStepMarkers(stepsCurb, "#e53935");
+addStepMarkers(stepsFree, "#2979ff", grpFree);
+addStepMarkers(stepsCurb, "#e53935", grpCurb);
 
-// ── Marqueurs des jobs (points d'origine) ────────────────────────────────
-{job_markers_js}
+// ── Marqueurs des jobs (points d'origine) — couche fixe ──────────────────
+const grpJobs = L.layerGroup().addTo(map);
+{job_markers_js.replace('.addTo(map)', '.addTo(grpJobs)')}
 
 // ── Dépôt ────────────────────────────────────────────────────────────────
 L.marker([{depot_lat}, {depot_lon}], {{
   icon: L.divIcon({{
     className: "",
     html: `<div style="background:#2e7d32;color:white;font-size:11px;font-weight:bold;
-                        padding:3px 6px;border-radius:4px;white-space:nowrap;">Dépôt</div>`,
-    iconAnchor: [20, 10],
+                        padding:3px 7px;border-radius:4px;white-space:nowrap;">Dépôt</div>`,
+    iconAnchor: [22, 10],
   }})
 }}).addTo(map);
 
-// ── Légende ──────────────────────────────────────────────────────────────
-const legend = L.control({{position: "bottomleft"}});
-legend.onAdd = () => {{
-  const div = L.DomUtil.create("div", "legend");
+// ── Contrôle de couches ───────────────────────────────────────────────────
+grpFree.addTo(map);
+grpCurb.addTo(map);
+
+L.control.layers(null, {{
+  "🔵 Sans contrainte ({cost_free}s)": grpFree,
+  "🔴 Avec approach=curb ({cost_curb}s)": grpCurb,
+  "📍 Positions des jobs": grpJobs,
+}}, {{ collapsed: false, position: "topright" }}).addTo(map);
+
+// ── Panneau d'info ────────────────────────────────────────────────────────
+const info = L.control({{position: "bottomleft"}});
+info.onAdd = () => {{
+  const div = L.DomUtil.create("div", "info-box");
   div.innerHTML = `
-    <b>Comparaison approach=curb</b><br><br>
-    <span style="background:#2979ff"></span> Sans contrainte<br>
-    <span style="background:#e53935; border-top: 2px dashed #e53935"></span> Avec approach=curb<br>
+    <b>Comparaison approach=curb</b>
+    <table>
+      <tr><td></td><td><span class="swatch" style="background:#2979ff"></span>Sans curb</td>
+                   <td><span class="swatch" style="background:#e53935"></span>Avec curb</td></tr>
+      <tr><td>Coût</td><td>{cost_free}s</td><td>{cost_curb}s</td></tr>
+      <tr><td>Écart</td><td colspan="2"><b style="color:#e53935">{diff:+d}s ({diff_pct})</b></td></tr>
+      <tr><td>Ordre</td><td>{order_free}</td><td>{order_curb}</td></tr>
+    </table>
     <br>
-    <span class="dot" style="background:#f5c518;border:2px solid #333"></span> Localisation job<br>
-    <span class="dot" style="background:#2979ff"></span> Ordre visite (sans contrainte)<br>
-    <span class="dot" style="background:#e53935"></span> Ordre visite (curb)<br>
+    <span class="dot" style="background:#f5c518;border:2px solid #333"></span> Position job<br>
+    Cochez/décochez les couches →
   `;
   return div;
 }};
-legend.addTo(map);
+info.addTo(map);
 
-// ── Ajuster la vue sur les deux tracés ───────────────────────────────────
-const bounds = L.featureGroup([lineFree, lineCurb]).getBounds();
-if (bounds.isValid()) map.fitBounds(bounds.pad(0.15));
+// ── Vue initiale centrée sur les jobs ────────────────────────────────────
+const jobBounds = L.latLngBounds([
+  {[[f"[{lat},{lon}]" for lat,lon in jobs_latlon]]}
+]);
+map.fitBounds(jobBounds.pad(0.4));
 </script>
 </body>
 </html>"""
@@ -368,6 +392,8 @@ def main():
         JOBS_LATLON, DEPOT_LATLON,
         coords_free, steps_free,
         coords_curb, steps_curb,
+        cost_free=cost_free,
+        cost_curb=cost_curb,
     )
     out = Path(args.output)
     out.write_text(html, encoding="utf-8")
