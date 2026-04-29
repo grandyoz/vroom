@@ -32,8 +32,6 @@ JOBS_LATLON = [
     (43.742350, 7.427782),
     (43.741881, 7.427107),
 ]
-# Dépôt légèrement à l'écart du cluster
-DEPOT_LATLON = (43.7410, 43.4255)   # recalculé ci-dessous
 DEPOT_LATLON = (43.7408, 7.4255)
 
 
